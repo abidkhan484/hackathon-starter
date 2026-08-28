@@ -3,7 +3,7 @@ const { expect } = require('chai');
 const sinon = require('sinon');
 
 // Import the morgan configuration to ensure tokens are registered
-const { _getMorganFormat } = require('../config/morgan');
+const { _getMorganFormat, _formatLine } = require('../config/morgan');
 
 describe('Morgan Configuration Tests', () => {
   let req;
@@ -50,7 +50,7 @@ describe('Morgan Configuration Tests', () => {
     process.env.NODE_ENV = originalEnv;
   });
 
-  describe('Custom Token: colored-status', () => {
+  describe('Status Coloring', () => {
     it('should color status codes correctly', () => {
       const testCases = [
         { status: 200, color: '\x1b[32m' }, // green
@@ -61,10 +61,14 @@ describe('Morgan Configuration Tests', () => {
 
       testCases.forEach(({ status, color }) => {
         res.statusCode = status;
-        const formatter = morgan.compile(':colored-status');
-        const output = formatter(morgan, req, res);
-        expect(output).to.equal(`${color}${status}\x1b[0m`);
+        const output = _formatLine(morgan, req, res);
+        expect(output).to.include(`${color}${status}\x1b[0m`);
       });
+    });
+
+    it('should emit real escape sequences rather than escaped text', () => {
+      res.statusCode = 500;
+      expect(_formatLine(morgan, req, res)).to.not.include('\\u001b');
     });
   });
 

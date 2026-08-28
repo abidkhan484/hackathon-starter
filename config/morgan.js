@@ -1,26 +1,20 @@
 const logger = require('morgan');
 const Bowser = require('bowser');
 
-// Color definitions for console output
+// Colors belong in the format string, not in a token: morgan escapes control characters that a token returns.
 const colors = {
-  red: '\x1b[31m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  cyan: '\x1b[36m',
-  reset: '\x1b[0m',
+  red: 31,
+  green: 32,
+  yellow: 33,
+  cyan: 36,
 };
 
-// Custom colored status token
-logger.token('colored-status', (req, res) => {
-  const status = res.statusCode;
-  let color;
-  if (status >= 500) color = colors.red;
-  else if (status >= 400) color = colors.yellow;
-  else if (status >= 300) color = colors.cyan;
-  else color = colors.green;
-
-  return color + status + colors.reset;
-});
+const statusColor = (status) => {
+  if (status >= 500) return colors.red;
+  if (status >= 400) return colors.yellow;
+  if (status >= 300) return colors.cyan;
+  return colors.green;
+};
 
 // Custom token for timestamp without timezone offset
 logger.token('short-date', () => {
@@ -88,11 +82,15 @@ logger.token('transfer-state', (req, res) => {
 // In production, omit the IP address to reduce the risk of leaking sensitive information and to support
 // compliance with GDPR and other privacy regulations.
 // Also using a function so we can test it in our unit tests.
-const getMorganFormat = () =>
-  process.env.NODE_ENV === 'production' ? ':short-date :method :url :colored-status :response-time[0]ms :bytes-sent :transfer-state - :parsed-user-agent' : ':short-date :method :url :colored-status :response-time[0]ms :bytes-sent :transfer-state :remote-addr :parsed-user-agent';
+const getMorganFormat = (color = colors.green) =>
+  process.env.NODE_ENV === 'production'
+    ? `:short-date :method :url \x1b[${color}m:status\x1b[0m :response-time[0]ms :bytes-sent :transfer-state - :parsed-user-agent`
+    : `:short-date :method :url \x1b[${color}m:status\x1b[0m :response-time[0]ms :bytes-sent :transfer-state :remote-addr :parsed-user-agent`;
 
-// Set the format once at initialization for the actual middleware so we don't have to evaluate on each call
-const morganFormat = getMorganFormat();
+// Compile one line per color at startup instead of on every request
+const compiledLines = new Map(Object.values(colors).map((color) => [color, logger.compile(getMorganFormat(color))]));
+
+const formatLine = (tokens, req, res) => compiledLines.get(statusColor(res.statusCode))(tokens, req, res);
 
 // Create a middleware to capture original content length
 const captureContentLength = (req, res, next) => {
@@ -124,7 +122,7 @@ const captureContentLength = (req, res, next) => {
 
 exports.morganLogger = () => (req, res, next) => {
   captureContentLength(req, res, () => {
-    logger(morganFormat, {
+    logger(formatLine, {
       immediate: false,
     })(req, res, next);
   });
@@ -132,3 +130,4 @@ exports.morganLogger = () => (req, res, next) => {
 
 // Expose for testing
 exports._getMorganFormat = getMorganFormat;
+exports._formatLine = formatLine;
